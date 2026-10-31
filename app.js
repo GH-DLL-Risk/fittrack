@@ -28,6 +28,7 @@ const ICON = {
   stats: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
   lib: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5v11M17.5 6.5v11M3 9v6M21 9v6M6.5 12h11"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  rank: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21V10h8v11M2 21v-7h6M16 21v-5h6M2 21h20M12 3l1 2 2 .3-1.5 1.4.4 2.1L12 7.8l-1.9 1 .4-2.1L9 5.3l2-.3z"/></svg>',
   left: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   right: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
@@ -77,6 +78,7 @@ const inRange = (v, lo, hi) => typeof v === 'number' && isFinite(v) && v >= lo &
 const optNum = (v, lo, hi) => inRange(v, lo, hi) ? v : undefined;
 const str = (v, max = 80) => typeof v === 'string' ? v.slice(0, max) : '';
 const list = (a, f, max = 100000) => Array.isArray(a) ? a.slice(0, max).map(x => x && typeof x === 'object' || typeof x === 'string' ? f(x) : null).filter(Boolean) : [];
+const SHARE_KEYS = ['lift', 'kg', 'bf', 'out', 'in'];   // what may be shared with the team; all off by default
 const DAY_LIMITS = {kg: [20, 400], bf: [2, 70], sleep: [0, 24], eat: [0, 15000]};
 const GOAL_LIMITS = {kg: [20, 400], kgStart: [20, 400], bf: [2, 70], bfStart: [2, 70], sleep: [3, 14], eat: [500, 10000], volume: [1, 1e7], cardio: [1, 1e5]};
 function normalize(d) {
@@ -104,6 +106,7 @@ function normalize(d) {
       birthYear: optNum(s.birthYear, 1900, 2100) ?? null,
       heightCm: optNum(s.heightCm, 100, 250) ?? null,
       activity: [1.2, 1.375, 1.55, 1.725].includes(s.activity) ? s.activity : 1.2,
+      share: Object.fromEntries(SHARE_KEYS.map(k => [k, !!(s.share && s.share[k] === true)])),
     },
     goals,
     days,
@@ -162,6 +165,7 @@ function save() {
   writeChain = writeChain.then(async () => write(lk ? JSON.stringify(await seal(lk.key, lk.salt, text, {pin: lk.pin})) : text))
     .catch(() => toast('Could not save'));
   if (!askedPersist && navigator.storage && navigator.storage.persist) { askedPersist = true; navigator.storage.persist().catch(() => {}); }
+  if (typeof scheduleSync === 'function') scheduleSync();
 }
 
 function showLock() {
@@ -182,6 +186,7 @@ function showLock() {
       const data = JSON.parse(await unseal(key, lockBox));
       appLock = {key, salt, pin: lockBox.pin}; lockBox = null; db = normalize(data);
       el.classList.remove('open'); el.innerHTML = ''; render();
+      scheduleSync(1500);
     } catch (e) { err.textContent = 'Wrong PIN — try again'; pin.value = ''; pin.focus(); }
   };
   $('#unlockBtn').onclick = go;
@@ -310,7 +315,8 @@ function goalsHtml(date, detail) {
 }
 
 /* ---------- UI state ---------- */
-const S = {tab: 'log', date: today(), range: '3m', statsEx: null, metric: 'max', cardioAct: null, cardioMetric: 'min', libTab: 's', libQ: ''};
+const S = {tab: 'log', date: today(), range: '3m', statsEx: null, metric: 'max', cardioAct: null, cardioMetric: 'min', libTab: 's', libQ: '',
+  rkCat: 'ex', rkEx: null, rkMode: '1rm', rkEat: 'adh', rkPeriod: 'tw', joinCode: ''};
 
 /* ---------- toast & sheet ---------- */
 let toastT;
@@ -352,7 +358,7 @@ const field = (id, label, value, placeholder = '', mode = 'decimal') =>
   `<div><label class="field-label" for="${esc(id)}">${label}</label><input id="${esc(id)}" type="text" inputmode="${mode}" autocomplete="off" value="${esc(value ?? '')}" placeholder="${esc(placeholder)}"></div>`;
 
 /* ---------- render shell ---------- */
-const TABS = [['log', 'Log'], ['stats', 'Progress'], ['lib', 'Exercises'], ['settings', 'Settings']];
+const TABS = [['log', 'Log'], ['stats', 'Progress'], ['rank', 'Ranking'], ['lib', 'Exercises'], ['settings', 'Settings']];
 function renderNav() {
   $('#nav').innerHTML = TABS.map(([k, l]) => `<button data-act="tab" data-tab="${k}" class="${S.tab === k ? 'on' : ''}">${ICON[k]}${l}</button>`).join('');
 }
@@ -373,7 +379,8 @@ function renderTop() {
 function render() {
   renderTop(); renderNav();
   const v = $('#view');
-  v.innerHTML = S.tab === 'log' ? viewLog() : S.tab === 'stats' ? viewStats() : S.tab === 'lib' ? viewLib() : viewSettings();
+  v.innerHTML = S.tab === 'log' ? viewLog() : S.tab === 'stats' ? viewStats() : S.tab === 'rank' ? viewRanking() : S.tab === 'lib' ? viewLib() : viewSettings();
+  if (S.tab === 'rank') bindRanking();
   if (S.tab === 'lib') bindLibSearch();
   if (S.tab === 'stats') {
     $('#statsEx')?.addEventListener('change', e => { S.statsEx = e.target.value; render(); });
@@ -405,6 +412,7 @@ function viewLog() {
   let h = '';
   const hasData = db.lifts.length + db.cardio.length + Object.keys(db.days).length > 0;
   const lb = db.settings.lastBackup;
+  h += installHint();
   if (hasData && (!lb || diffDays(lb.slice(0, 10), today()) > 14)) {
     h += `<div class="banner"><span class="grow">Your data lives only on this phone. ${lb ? `Last backup ${fmtD(lb.slice(0, 10))}.` : 'No backup yet.'}</span><button class="btn sm" data-act="tab" data-tab="settings">Back up</button></div>`;
   }
@@ -1078,10 +1086,343 @@ function csvExport() {
   download(new Blob(['﻿' + [head, ...rows].map(r => r.map(q).join(',')).join('\n')], {type: 'text/csv'}), `fittrack-${today()}.csv`);
 }
 
+/* ---------- install hints ---------- */
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (S.tab === 'log') render(); });
+function installHint() {
+  if (isStandalone()) return '';
+  try { if (localStorage.getItem('fittrack.hideInstall')) return ''; } catch (e) {}
+  const close = `<button class="icon-btn" data-act="hide-install" aria-label="Dismiss">${ICON.close}</button>`;
+  if (installEvt) return `<div class="banner"><span class="grow">Install FitTrack on your home screen for quick, offline access.</span><button class="btn sm" data-act="install">Install</button>${close}</div>`;
+  if (isIOS) return `<div class="banner"><span class="grow">To install on iPhone: tap <b>Share</b> → <b>Add to Home Screen</b>. Installed, it works offline and your data is kept more safely.</span>${close}</div>`;
+  return '';
+}
+
+/* ---------- team (Supabase backend) ---------- */
+// Only the nickname, team membership and the numbers switched on under "What you share" leave the phone.
+const CFG = window.FITTRACK_CONFIG || {};
+const teamOn = () => !!(CFG.supabaseUrl && CFG.supabaseKey);
+const TEAM_STORE = 'fittrack.team';
+let team = (() => { try { const t = JSON.parse(localStorage.getItem(TEAM_STORE)); return t && typeof t === 'object' ? t : {}; } catch (e) { return {}; } })();
+const saveTeam = () => { try { localStorage.setItem(TEAM_STORE, JSON.stringify(team)); } catch (e) {} };
+const RK = {info: null, metrics: [], rows: [], rowsKey: '', err: '', busy: false, at: 0};
+
+class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
+async function sbFetch(path, {method = 'GET', body, auth = true} = {}) {
+  const headers = {apikey: CFG.supabaseKey, 'Content-Type': 'application/json'};
+  if (auth) headers.Authorization = 'Bearer ' + await accessToken();
+  let res;
+  try {
+    res = await fetch(CFG.supabaseUrl.replace(/\/$/, '') + path, {method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+      cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer'});
+  } catch (e) { throw new ApiError("Can't reach the team server. Are you offline?", 0); }
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) {}
+  if (!res.ok) throw new ApiError((data && (data.message || data.msg || data.error_description || data.error)) || `Team server error (${res.status})`, res.status);
+  return data;
+}
+function setSession(d) {
+  team.session = {access_token: d.access_token, refresh_token: d.refresh_token, user: d.user && d.user.id,
+    expires_at: d.expires_at || Math.floor(Date.now() / 1000) + (d.expires_in || 3600)};
+  saveTeam();
+}
+// The account is anonymous (no email or password) and lives on this phone.
+let tokenPromise = null;
+function accessToken() {
+  const s = team.session;
+  if (s && s.access_token && s.expires_at * 1000 > Date.now() + 60000) return Promise.resolve(s.access_token);
+  return tokenPromise = tokenPromise || (async () => {
+    try {
+      if (s && s.refresh_token) {
+        try { setSession(await sbFetch('/auth/v1/token?grant_type=refresh_token', {method: 'POST', body: {refresh_token: s.refresh_token}, auth: false})); }
+        catch (e) {
+          if (e.status >= 400 && e.status < 500) { team = {}; saveTeam(); throw new ApiError('Your team sign-in on this phone has expired. Please join the team again.', 401); }
+          throw e;
+        }
+      } else {
+        setSession(await sbFetch('/auth/v1/signup', {method: 'POST', body: {data: {}}, auth: false}));
+      }
+      return team.session.access_token;
+    } finally { tokenPromise = null; }
+  })();
+}
+const rpc = (fn, args = {}) => sbFetch('/rest/v1/rpc/' + fn, {method: 'POST', body: args});
+
+const RK_PERIODS = [['tw', 'This week'], ['lw', 'Last week'], ['tm', 'This month'], ['lm', 'Last month'], ['all', 'All time']];
+function periods() {
+  const t = today(), w = weekStart(t), m0 = parseD(t.slice(0, 7) + '-01');
+  const month = off => {
+    const a = iso(new Date(m0.getFullYear(), m0.getMonth() + off, 1)), b = iso(new Date(m0.getFullYear(), m0.getMonth() + off + 1, 0));
+    return {k: 'm' + a.slice(0, 7), from: a, to: b};
+  };
+  return {tw: {k: 'w' + w, from: w, to: addDays(w, 6)}, lw: {k: 'w' + addDays(w, -7), from: addDays(w, -7), to: addDays(w, -1)},
+    tm: month(0), lm: month(-1), all: {k: 'all', from: '0000-01-01', to: '9999-12-31'}};
+}
+const r1 = v => Math.round(v * 10) / 10;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// % of the way to the goal: overall for "all", progress made within the period otherwise
+function goalShare(f, p) {
+  const target = db.goals[f], ks = keysOf(f);
+  if (!(target > 0) || !ks.length) return null;
+  const start = db.goals[f + 'Start'] != null ? db.goals[f + 'Start'] : db.days[ks[0]][f], dist = start - target;
+  if (Math.abs(dist) < 0.1) return null;
+  const inP = ks.filter(k => k >= p.from && k <= p.to);
+  if (!inP.length) return null;
+  const end = db.days[inP[inP.length - 1]][f];
+  if (p.k === 'all') return (start - end) / dist * 100;
+  const before = ks.filter(k => k < p.from).pop();
+  if (!before && inP.length < 2) return null;
+  return ((before ? db.days[before][f] : db.days[inP[0]][f]) - end) / dist * 100;
+}
+// The summary numbers this phone shares, for every ranking period
+function computeScores() {
+  const sh = db.settings.share, rows = [], setsBy = new Map(), cardBy = new Map();
+  for (const l of db.lifts) setsBy.set(l.date, (setsBy.get(l.date) || 0) + l.sets.length);
+  for (const c of db.cardio) cardBy.set(c.date, (cardBy.get(c.date) || 0) + c.kcal);
+  const actDates = [...new Set([...setsBy.keys(), ...cardBy.keys()])].sort();
+  for (const p of Object.values(periods())) {
+    const inP = d => d >= p.from && d <= p.to;
+    if (sh.lift) {
+      const by = new Map();
+      for (const l of db.lifts) if (LIB_MAP[l.ex] && l.ex[0] === 's' && inP(l.date)) for (const s of l.sets) if (s.kg > 0 && s.reps > 0) {
+        const o = by.get(l.ex) || {rm: 0, vol: 0};
+        o.rm = Math.max(o.rm, e1rm(s.kg, Math.min(s.reps, 20))); o.vol += s.kg * s.reps; by.set(l.ex, o);
+      }
+      for (const [ex, o] of by) rows.push({m: `ex:${ex}:1rm`, p: p.k, v: r1(clamp(o.rm, 0, 600))}, {m: `ex:${ex}:vol`, p: p.k, v: Math.round(clamp(o.vol, 0, 5e6))});
+    }
+    for (const f of ['kg', 'bf']) if (sh[f]) {
+      const v = goalShare(f, p);
+      if (v != null && isFinite(v)) rows.push({m: 'goal:' + f, p: p.k, v: r1(clamp(v, -1000, 1000))});
+    }
+    if (sh.out && actDates.length) {
+      const from = p.k === 'all' ? actDates[0] : p.from, to = p.to < today() ? p.to : today();
+      if (from <= to) {
+        let k = 0;
+        for (const d of actDates) if (d >= from && d <= to) k += (cardBy.get(d) || 0) + liftKcal(setsBy.get(d) || 0, bodyKgOn(d));
+        rows.push({m: 'kcal:out', p: p.k, v: Math.round(clamp(k / (diffDays(from, to) + 1), 0, 10000))});
+      }
+    }
+    if (sh.in) {
+      const eats = keysOf('eat').filter(inP).map(k => db.days[k].eat);
+      if (eats.length) {
+        rows.push({m: 'kcal:in', p: p.k, v: Math.round(clamp(avg(eats), 0, 15000))});
+        if (db.goals.eat > 0) rows.push({m: 'kcal:adh', p: p.k, v: r1(clamp(avg(eats.map(e => Math.abs(e - db.goals.eat) / db.goals.eat * 100)), 0, 1000))});
+      }
+    }
+  }
+  return rows;
+}
+let syncTimer = null;
+function scheduleSync(delay = 4000) {
+  if (!teamOn() || !team.team || lockBox) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncScores().catch(() => {}), delay);
+}
+async function syncScores(force) {
+  if (!teamOn() || !team.team || lockBox) return;
+  const rows = computeScores(), sig = JSON.stringify(rows);
+  if (!force && sig === team.lastSig && Date.now() - (team.lastSync || 0) < 6 * 3600e3) return;
+  try {
+    await rpc('replace_my_scores', {p_rows: rows});
+    team.lastSig = sig; team.lastSync = Date.now(); team.syncErr = ''; saveTeam();
+  } catch (e) {
+    team.syncErr = e.message;
+    if (/not in a team/i.test(e.message)) team.team = null;
+    saveTeam(); throw e;
+  }
+}
+
+const RK_CATS = [['ex', 'Exercise'], ['kg', 'Weight goal'], ['bf', 'Body fat goal'], ['out', 'Calories burned'], ['in', 'Calories eaten']];
+const SHARE_FOR = {ex: 'lift', kg: 'kg', bf: 'bf', out: 'out', in: 'in'};
+const SHARE_INFO = {
+  lift: ['Lifting', 'Best estimated 1-rep max and volume for built-in exercises'],
+  kg: ['Weight goal progress', '% of the way to your weight goal — never your weight itself'],
+  bf: ['Body fat goal progress', '% of the way to your body fat goal'],
+  out: ['Calories burned', 'Average exercise calories per day (cardio + lifting)'],
+  in: ['Calories eaten', 'Average per logged day, and how close you stay to your target'],
+};
+const rkExIds = () => RK.metrics.filter(m => /^ex:s-[a-z0-9-]+:1rm$/.test(m)).map(m => m.slice(3, -4))
+  .sort((a, b) => exById(a).name.localeCompare(exById(b).name));
+function rkMetric() {
+  if (S.rkCat === 'ex') return S.rkEx ? `ex:${S.rkEx}:${S.rkMode}` : null;
+  if (S.rkCat === 'kg' || S.rkCat === 'bf') return 'goal:' + S.rkCat;
+  if (S.rkCat === 'out') return 'kcal:out';
+  return S.rkEat === 'adh' ? 'kcal:adh' : 'kcal:in';
+}
+function rkMeta(m) {
+  if (m.endsWith(':1rm')) return {unit: 'kg', dec: 1, dir: 1, what: 'best estimated 1-rep max'};
+  if (m.endsWith(':vol')) return {unit: 'kg', dec: 0, dir: 1, what: 'total volume (weight × reps)'};
+  if (m.startsWith('goal:')) return {unit: '%', dec: 0, dir: 1, signed: true, what: S.rkPeriod === 'all' ? '% of their own goal reached so far' : '% of their goal distance covered in this period'};
+  if (m === 'kcal:out') return {unit: 'kcal/day', dec: 0, dir: 1, what: 'exercise calories burned per day'};
+  if (m === 'kcal:adh') return {unit: '% off', dec: 0, dir: -1, what: 'average distance from their own daily calorie target (lower is better)'};
+  return {unit: 'kcal/day', dec: 0, dir: 0, what: 'average calories eaten per logged day'};
+}
+const rerank = () => { if (S.tab === 'rank') render(); };
+async function loadTeam() {
+  if (!teamOn() || !team.session) return;
+  RK.busy = true; rerank();
+  try {
+    const info = await rpc('my_team');
+    RK.info = info;
+    team.team = info ? {id: info.id, name: info.name} : null; saveTeam();
+    if (info) {
+      await syncScores().catch(() => {});
+      RK.metrics = (await rpc('team_metrics')) || [];
+      const ids = rkExIds();
+      if (!ids.includes(S.rkEx)) S.rkEx = ids[0] || null;
+      await loadScores(false);
+    }
+    RK.err = '';
+  } catch (e) { RK.err = e.message; }
+  RK.busy = false; RK.at = Date.now(); rerank();
+}
+async function loadScores(redraw = true) {
+  const m = rkMetric(), key = m + '|' + periods()[S.rkPeriod].k;
+  try {
+    RK.rows = m ? (await rpc('team_scores', {p_metric: m, p_period: periods()[S.rkPeriod].k})) || [] : [];
+    RK.rowsKey = key; RK.err = '';
+  } catch (e) { RK.err = e.message; }
+  if (redraw) rerank();
+}
+let teamBusy = false;
+async function teamAction(fn) {
+  if (teamBusy) return;
+  teamBusy = true;
+  try { await fn(); } catch (e) { toast(e.message); } finally { teamBusy = false; }
+}
+function afterJoin(info, msg) {
+  RK.info = info; team.team = {id: info.id, name: info.name}; S.joinCode = ''; saveTeam();
+  toast(msg); render(); loadTeam();
+}
+const fmtCode = c => String(c).replace(/(.{5})(?=.)/g, '$1-');
+const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+
+function viewRanking() {
+  if (!teamOn()) return `<div class="card"><div class="empty">Team features aren't set up in this copy of FitTrack.</div></div>`;
+  if (!team.team) return viewJoin();
+  const info = RK.info;
+  let h = RK.err ? `<div class="banner"><span class="grow">${esc(RK.err)}</span><button class="btn sm" data-act="rk-refresh">Retry</button></div>` : '';
+  if (!info) return h + `<div class="card"><div class="empty">${RK.busy ? 'Loading your team…' : 'Your team hasn\'t loaded yet.'}</div><button class="btn block" data-act="rk-refresh">Refresh</button></div>`;
+  h += `<div class="chips" style="margin-bottom:8px">${RK_CATS.map(([k, l]) => `<button class="chip ${S.rkCat === k ? 'on' : ''}" data-act="rk-cat" data-k="${k}">${l}</button>`).join('')}</div>`;
+  if (S.rkCat === 'ex') {
+    const ids = rkExIds();
+    if (ids.length) h += `<select id="rkEx" aria-label="Exercise" style="margin-bottom:8px">${ids.map(id => `<option value="${esc(id)}" ${id === S.rkEx ? 'selected' : ''}>${esc(exById(id).name)}</option>`).join('')}</select>
+      <div class="chips" style="margin-bottom:8px">${[['1rm', 'Est. 1-rep max'], ['vol', 'Volume']].map(([k, l]) => `<button class="chip ${S.rkMode === k ? 'on' : ''}" data-act="rk-mode" data-k="${k}">${l}</button>`).join('')}</div>`;
+  }
+  if (S.rkCat === 'in') h += `<div class="chips" style="margin-bottom:8px">${[['adh', 'Closest to own target'], ['in', 'Daily average']].map(([k, l]) => `<button class="chip ${S.rkEat === k ? 'on' : ''}" data-act="rk-eat" data-k="${k}">${l}</button>`).join('')}</div>`;
+  h += `<div class="chips" style="margin-bottom:12px">${RK_PERIODS.map(([k, l]) => `<button class="chip ${S.rkPeriod === k ? 'on' : ''}" data-act="rk-period" data-k="${k}">${l}</button>`).join('')}</div>`;
+  h += rankBoard(info) + sharingCard() + teamCard(info);
+  return h;
+}
+function rankBoard(info) {
+  const m = rkMetric();
+  const sharing = db.settings.share[SHARE_FOR[S.rkCat]];
+  const notMe = sharing ? 'You have nothing to share for this period yet.' : `You're not sharing ${SHARE_INFO[SHARE_FOR[S.rkCat]][0].toLowerCase()} — switch it on under “What you share”.`;
+  if (!m) return `<div class="card"><div class="empty">Nobody in the team is sharing lifting results yet.<br>${sharing ? '' : notMe}</div></div>`;
+  if (RK.rowsKey !== m + '|' + periods()[S.rkPeriod].k) return `<div class="card"><div class="empty">Loading…</div></div>`;
+  const meta = rkMeta(m), rows = [...RK.rows].sort((a, b) => meta.dir < 0 ? a.value - b.value : b.value - a.value);
+  if (!rows.length) return `<div class="card"><div class="empty">Nobody has shared this for this period yet.<br>${notMe}</div></div>`;
+  const fv = v => `${meta.signed && v > 0 ? '+' : ''}${fmt(v, meta.dec)} ${meta.unit}`;
+  const av = avg(rows.map(r => r.value)), top = Math.max(...rows.map(r => r.value), av, 0) || 1;
+  const pct = v => clamp(Math.max(0, v) / top * 100, 0, 100).toFixed(1);
+  const mine = rows.findIndex(r => r.user_id === info.me), lead = rows[0];
+  const you = r => r.user_id === info.me ? ' <span class="muted">(you)</span>' : '';
+  let h = `<div class="card"><div class="row" style="align-items:flex-start;gap:12px">
+      <div class="grow"><div class="tiny muted">${meta.dir === 0 ? 'Highest' : 'In the lead'}</div><div style="font-size:22px;font-weight:700;overflow-wrap:anywhere">${esc(lead.nickname)}${you(lead)}</div><div class="small num">${fv(lead.value)}</div></div>
+      <div style="text-align:right"><div class="tiny muted">Team average</div><div style="font-size:18px;font-weight:700" class="num">${fv(av)}</div><div class="tiny muted">${rows.length} ${rows.length === 1 ? 'person' : 'people'}</div></div></div>
+    <div class="small" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">${mine >= 0 ? `You: <b>#${mine + 1}</b> of ${rows.length} · ${signed(rows[mine].value - av, meta.dec)} ${meta.unit} vs average` : notMe}</div>
+    <div class="tiny muted" style="margin-top:4px">Ranked by ${meta.what}.</div></div>`;
+  h += `<div class="card" style="padding:4px 14px">` + rows.map((r, i) => `<div class="rk-row${r.user_id === info.me ? ' me' : ''}"><span class="rk-pos">${i + 1}</span><span class="rk-name">${esc(r.nickname)}${you(r)}</span><span class="rk-val">${fv(r.value)}</span><div class="rk-bar"><i style="width:${pct(r.value)}%"></i><b style="left:${pct(av)}%"></b></div></div>`).join('')
+    + `</div><div class="tiny muted" style="margin:-4px 2px 12px">The line on each bar marks the team average.</div>`;
+  return h;
+}
+function sharingCard() {
+  const sh = db.settings.share, any = SHARE_KEYS.some(k => sh[k]);
+  const status = team.syncErr ? `not shared: ${esc(team.syncErr)}` : team.lastSync ? `updated ${ago(team.lastSync)}` : 'nothing shared yet';
+  const need = {kg: !(db.goals.kg > 0) && 'set a weight goal in Settings', bf: !(db.goals.bf > 0) && 'set a body fat goal in Settings', in: !(db.goals.eat > 0) && 'the target comparison needs a calorie goal'};
+  return `<div class="sec-title"><h2>What you share</h2><span class="tiny muted">${status}</span></div>
+    <div class="card" style="padding:2px 14px">${SHARE_KEYS.map(k => `<button class="toggle${sh[k] ? ' on' : ''}" data-act="share" data-k="${k}" role="switch" aria-checked="${sh[k]}">
+      <span class="switch"></span><span class="grow"><span style="font-weight:600;display:block">${SHARE_INFO[k][0]}</span><span class="small muted">${SHARE_INFO[k][1]}${need[k] ? ` (${need[k]})` : ''}</span></span></button>`).join('')}</div>
+    <div class="tiny muted" style="margin:-4px 2px 4px">Off by default. Only these summary numbers are sent; your logs stay on this phone. Turning one off deletes it from the server.</div>
+    ${any ? `<button class="btn sm" style="margin:6px 0 4px" data-act="rk-sync">Share now</button>` : ''}`;
+}
+function teamCard(info) {
+  const owner = info.role === 'owner';
+  return `<div class="sec-title"><h2>Team</h2><button class="btn sm" data-act="rk-refresh">${RK.busy ? 'Refreshing…' : 'Refresh'}</button></div>
+    <div class="card stack">
+      <div><div style="font-weight:700;font-size:17px">${esc(info.name)}</div><div class="tiny muted">You are ${esc(info.nickname)}${owner ? ' · owner' : ''}${RK.at ? ` · loaded ${ago(RK.at)}` : ''}</div></div>
+      <div><div class="tiny muted">Invite code</div><div class="row"><span class="code grow">${esc(fmtCode(info.invite_code))}</span><button class="btn sm primary" data-act="rk-invite">Invite</button></div></div>
+      <div>${(info.members || []).map(x => `<div class="list-row"><span class="grow">${esc(x.nickname)}${x.user_id === info.me ? ' <span class="muted">(you)</span>' : ''}${x.role === 'owner' ? ' <span class="badge">owner</span>' : ''}</span>${owner && x.user_id !== info.me ? `<button class="btn sm danger" data-act="rk-remove" data-id="${esc(x.user_id)}" data-n="${esc(x.nickname)}">Remove</button>` : ''}</div>`).join('')}</div>
+      <div class="btn-row"><button class="btn sm" data-act="rk-nick">Change nickname</button>${owner ? '<button class="btn sm" data-act="rk-code">New invite code</button>' : ''}<button class="btn sm" data-act="rk-leave">Leave team</button></div>
+      <div class="tiny muted">Your team account has no email or password and lives only on this phone. If you clear the browser's data or change phones, join again with a new nickname; ${owner ? 'you' : 'the owner'} can remove the old one.</div>
+      <button class="btn sm danger" data-act="rk-delete">Delete my team account</button>
+    </div>`;
+}
+function viewJoin() {
+  return `<div class="card"><div style="font-weight:700;font-size:17px">Compare with your team</div>
+      <div class="small muted" style="margin-top:6px">See who's in the lead on lifts, weight goals and calories, and how you compare with the team average. No email or password: you just pick a nickname, and only the numbers you switch on leave this phone.</div></div>
+    <div class="sec-title"><h2>Join a team</h2></div>
+    <div class="card stack">${field('j-code', 'Invite code', S.joinCode, 'e.g. A1B2C-D3E4F', 'text')}${field('j-nick', 'Your nickname', '', '2–20 characters', 'text')}
+      <button class="btn primary block" data-act="rk-join">Join team</button></div>
+    <div class="sec-title"><h2>Or start a new team</h2></div>
+    <div class="card stack">${field('c-name', 'Team name', '', 'e.g. Morning crew', 'text')}${field('c-nick', 'Your nickname', '', '2–20 characters', 'text')}
+      <button class="btn block" data-act="rk-create">Create team</button></div>
+    <div class="tiny muted">Your team account lives only on this phone. If you clear the browser's data or change phones, you'll join again with a new nickname.</div>`;
+}
+function bindRanking() {
+  $('#rkEx')?.addEventListener('change', e => { S.rkEx = e.target.value; render(); loadScores(); });
+}
+
 /* ---------- actions ---------- */
 const ACT = {
   'close-sheet': () => closeSheet(),
-  tab: t => { S.tab = t.dataset.tab; render(); window.scrollTo(0, 0); },
+  tab: t => {
+    S.tab = t.dataset.tab; render(); window.scrollTo(0, 0);
+    if (S.tab === 'rank' && team.team && !RK.busy && Date.now() - RK.at > 30000) loadTeam();
+  },
+  install: () => { if (!installEvt) return; installEvt.prompt(); installEvt.userChoice.finally(() => { installEvt = null; render(); }); },
+  'hide-install': () => { try { localStorage.setItem('fittrack.hideInstall', '1'); } catch (e) {} render(); },
+  'rk-join': () => teamAction(async () => afterJoin(await rpc('join_team', {p_code: $('#j-code').value, p_nickname: $('#j-nick').value}), 'Welcome to the team!')),
+  'rk-create': () => teamAction(async () => afterJoin(await rpc('create_team', {p_name: $('#c-name').value, p_nickname: $('#c-nick').value}), 'Team created — now invite your friends')),
+  'rk-refresh': () => loadTeam(),
+  'rk-cat': t => { S.rkCat = t.dataset.k; render(); loadScores(); },
+  'rk-mode': t => { S.rkMode = t.dataset.k; render(); loadScores(); },
+  'rk-eat': t => { S.rkEat = t.dataset.k; render(); loadScores(); },
+  'rk-period': t => { S.rkPeriod = t.dataset.k; render(); loadScores(); },
+  share: t => {
+    const k = t.dataset.k;
+    db.settings.share[k] = !db.settings.share[k]; save(); render();
+    teamAction(async () => { await syncScores(true); await loadTeam(); });
+  },
+  'rk-sync': () => teamAction(async () => { await syncScores(true); await loadTeam(); toast('Shared'); }),
+  'rk-invite': () => {
+    const info = RK.info, link = location.origin + location.pathname + '#join=' + info.invite_code;
+    const text = `Join my FitTrack team "${info.name}": ${link}\nInvite code: ${fmtCode(info.invite_code)}`;
+    if (navigator.share) navigator.share({title: 'FitTrack team invite', text}).catch(() => {});
+    else navigator.clipboard.writeText(text).then(() => toast('Invite copied'), () => toast('Code: ' + fmtCode(info.invite_code)));
+  },
+  'rk-code': () => {
+    if (!confirm('Make a new invite code? The old code and links stop working.')) return;
+    teamAction(async () => { RK.info = await rpc('new_invite_code'); render(); toast('New invite code ready'); });
+  },
+  'rk-remove': t => {
+    if (!confirm(`Remove ${t.dataset.n} from the team? Their shared results are deleted.`)) return;
+    teamAction(async () => { RK.info = await rpc('remove_member', {p_user: t.dataset.id}); await loadTeam(); toast('Removed'); });
+  },
+  'rk-nick': () => sheet('Change nickname', field('n-nick', 'New nickname', RK.info ? RK.info.nickname : '', '2–20 characters', 'text'), `<button class="btn primary" id="nOk">Save</button>`, p => {
+    $('#nOk', p).onclick = () => teamAction(async () => { RK.info = await rpc('set_nickname', {p_nickname: $('#n-nick', p).value}); closeSheet(); render(); toast('Nickname changed'); });
+  }),
+  'rk-leave': () => {
+    if (!confirm('Leave the team? Your shared results are deleted from the server.')) return;
+    teamAction(async () => { await rpc('leave_team'); team.team = null; team.lastSig = ''; saveTeam(); RK.info = null; render(); toast('You left the team'); });
+  },
+  'rk-delete': () => {
+    if (!confirm('Delete your team account? You leave the team and everything the server stores about you is deleted. Your own logs on this phone are not affected.')) return;
+    teamAction(async () => { await rpc('delete_me'); team = {}; saveTeam(); RK.info = null; render(); toast('Team account deleted'); });
+  },
   day: t => { S.date = addDays(S.date, +t.dataset.d); render(); },
   step: t => {
     const inp = document.getElementById(t.dataset.target);
@@ -1266,11 +1607,16 @@ let lastToday = today(), hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') { hiddenAt = Date.now(); return; }
   if (appLock && hiddenAt && Date.now() - hiddenAt > AUTO_LOCK_MS) { writeChain.then(() => location.reload()); return; }
+  scheduleSync(1500);
   const t = today();
   if (t !== lastToday) { if (S.date === lastToday) S.date = t; lastToday = t; render(); }
 });
+// Invite links look like …/fittrack/#join=CODE
+const hashJoin = /^#join=([A-Za-z0-9-]{4,24})$/.exec(location.hash);
+if (hashJoin) { S.joinCode = hashJoin[1]; S.tab = 'rank'; history.replaceState(null, '', location.pathname + location.search); }
 render();
 if (lockBox) showLock();
+else if (team.team) { scheduleSync(2000); if (S.tab === 'rank') loadTeam(); }
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

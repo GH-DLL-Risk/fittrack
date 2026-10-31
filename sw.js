@@ -1,7 +1,8 @@
 // Offline cache. Network first, so a fixed version reaches the phone on the next open;
 // the cached copy is used when offline or when the network takes longer than 3 s.
-const CACHE = 'fittrack-v3';
-const ASSETS = ['./', './index.html', './app.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png'];
+const CACHE = 'fittrack-v4';
+const ASSETS = ['./', './index.html', './app.js', './config.js', './manifest.webmanifest',
+  './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
