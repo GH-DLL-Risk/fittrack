@@ -161,7 +161,7 @@ end $$;
 -- Replaces all of your shared numbers with the given set: [{"m": metric, "p": period, "v": value}, ...]
 create or replace function public.replace_my_scores(p_rows jsonb) returns integer
 language plpgsql security definer set search_path = public as $$
-declare v_team uuid := _my_team(); r jsonb; v double precision; m text; n integer := 0;
+declare v_team uuid := _my_team(); r jsonb; v double precision; m text; n integer := 0; ok boolean;
 begin
   if v_team is null then raise exception 'Not in a team'; end if;
   if jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) > 2000 then raise exception 'Invalid score list'; end if;
@@ -174,13 +174,15 @@ begin
       raise exception 'Invalid score row';
     end if;
     v := (r->>'v')::double precision;
-    if not case
+    -- assigned first: inside IF ... THEN, the THENs of a CASE would end the condition early
+    ok := case
       when m like '%:1rm' then v between 0 and 600
       when m like '%:vol' then v between 0 and 5000000
       when m like 'goal:%' then v between -1000 and 1000
       when m = 'kcal:out' then v between 0 and 10000
       when m = 'kcal:in' then v between 0 and 15000
-      else v between 0 and 1000 end then
+      else v between 0 and 1000 end;
+    if not ok then
       raise exception 'Score out of range';
     end if;
     insert into scores (user_id, team_id, metric, period, value) values (auth.uid(), v_team, m, r->>'p', v)

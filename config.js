@@ -2,6 +2,6 @@
 // functions in supabase/schema.sql. The same URL must also be listed in connect-src in index.html.
 // Leave empty to run FitTrack without team features.
 window.FITTRACK_CONFIG = {
-  supabaseUrl: '',
-  supabaseKey: '',
+  supabaseUrl: 'https://prvjsstllmhjujuitpnb.supabase.co',
+  supabaseKey: 'sb_publishable_vHfIyr4QJMTjAS8uhjJr6w_526KnVBd',
 };

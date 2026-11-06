@@ -12,6 +12,14 @@ All data stays in the browser on your phone. The app has no server, no accounts 
 Content-Security-Policy blocks it from making network connections. Optional app lock and backup passwords
 encrypt data with AES-256-GCM (PBKDF2-SHA256 key derivation).
 
+## Team rankings
+
+The Ranking tab compares team members on exercises, weight/body fat goal progress and calories. Members join
+with an invite code and a nickname (anonymous account, no email or password). Every metric is opt-in, and only
+summary numbers are sent; the backend is Supabase, set up with [`supabase/schema.sql`](supabase/schema.sql), where
+tables are closed to direct access and all reads/writes go through functions that check team membership.
+
 ## Install
 
-Open the GitHub Pages link in Chrome on Android, then choose ⋮ → **Add to Home screen** / **Install app**.
+- **Android:** open the link in Chrome, then ⋮ → **Install app** / **Add to Home screen**.
+- **iPhone:** open the link in Safari, then Share → **Add to Home Screen**.
