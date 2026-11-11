@@ -19,6 +19,11 @@ const fmtD = (s, o = {month: 'short', day: 'numeric'}) => parseD(s).toLocaleDate
 const fmtLong = s => fmtD(s, {month: 'short', day: 'numeric', year: 'numeric'});
 const e1rm = (kg, reps) => reps <= 1 ? kg : kg * (1 + reps / 30); // Epley
 const fmtKg = v => v >= 10000 ? fmt(v / 1000, 1) + ' t' : fmt(v) + ' kg';
+// seconds as "45 s", "3:05" or "1:02:30"
+const fmtDur = sec => {
+  const s = Math.round(sec), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), r = String(s % 60).padStart(2, '0');
+  return s < 60 ? `${s} s` : h ? `${h}:${String(m).padStart(2, '0')}:${r}` : `${m}:${r}`;
+};
 const fmtSleep = h => { const m = Math.round(h * 60); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`; };
 const signed = (v, d = 1) => (v > 0 ? '+' : v < 0 ? '−' : '') + fmt(Math.abs(v), d);
 const fmtPace = minPerKm => `${Math.floor(minPerKm)}:${String(Math.round((minPerKm % 1) * 60)).padStart(2, '0')} /km`;
@@ -36,7 +41,8 @@ const ICON = {
 };
 
 /* ---------- built-in library ---------- */
-// "Name|flags": bw = bodyweight (kg field means added weight), sec = reps are seconds
+// "Name|flags": bw = bodyweight (kg field means added weight), sec = reps are seconds,
+// time = reps are a finishing time in seconds and lower is better (HYROX stations)
 const S_GROUPS = {
   Chest: ['Barbell Bench Press','Incline Barbell Bench Press','Decline Barbell Bench Press','Dumbbell Bench Press','Incline Dumbbell Press','Dumbbell Fly','Cable Crossover','Pec Deck (Machine Fly)','Chest Press Machine','Smith Machine Bench Press','Push-up|bw','Chest Dip|bw'],
   Back: ['Deadlift','Pull-up|bw','Chin-up|bw','Assisted Pull-up Machine','Lat Pulldown','Close-Grip Lat Pulldown','Seated Cable Row','Barbell Row','Dumbbell Row','T-Bar Row','Machine Row','Straight-Arm Pulldown','Rack Pull','Back Extension|bw'],
@@ -46,7 +52,17 @@ const S_GROUPS = {
   Legs: ['Back Squat','Front Squat','Goblet Squat','Smith Machine Squat','Leg Press','Hack Squat','Bulgarian Split Squat','Walking Lunge','Reverse Lunge','Step-up','Leg Extension','Lying Leg Curl','Seated Leg Curl','Romanian Deadlift','Stiff-Leg Deadlift','Hip Thrust','Glute Bridge','Cable Glute Kickback','Hip Abduction Machine','Hip Adduction Machine','Standing Calf Raise','Seated Calf Raise'],
   Core: ['Plank|bw,sec','Side Plank|bw,sec','Crunch|bw','Cable Crunch','Ab Crunch Machine','Hanging Leg Raise|bw','Lying Leg Raise|bw','Russian Twist','Ab Wheel Rollout|bw','Decline Sit-up|bw','Mountain Climber|bw','Dead Bug|bw'],
   'Full body': ['Kettlebell Swing','Clean and Press','Power Clean','Thruster','Farmer\'s Walk','Burpee|bw','Sled Push','Battle Ropes|bw,sec'],
+  CrossFit: ['Wall Ball','Box Jump|bw','Box Jump-over|bw','Burpee Box Jump-over|bw','Air Squat|bw','Pistol Squat|bw','Double-Unders|bw',
+    'Toes-to-Bar|bw','Knees-to-Elbows|bw','Kipping Pull-up|bw','Chest-to-Bar Pull-up|bw','Bar Muscle-up|bw','Ring Muscle-up|bw',
+    'Handstand Push-up|bw','Ring Dip|bw','Ring Row|bw','Rope Climb|bw','GHD Sit-up|bw',
+    'Snatch','Power Snatch','Squat Clean','Hang Power Clean','Clean and Jerk','Push Press','Push Jerk','Split Jerk','Overhead Squat',
+    'Sumo Deadlift High Pull','Dumbbell Snatch','Dumbbell Thruster','Devil Press','American Kettlebell Swing','Turkish Get-up'],
+  // Race stations are logged as a time (kg = sled, carry or ball weight); the drills below them use reps
+  HYROX: ['1 km Run|bw,time','SkiErg 1000 m|bw,time','Sled Push 50 m|time','Sled Pull 50 m|time','Burpee Broad Jumps 80 m|bw,time',
+    'Row 1000 m|bw,time','Farmers Carry 200 m|time','Sandbag Lunges 100 m|time','Wall Balls 100 reps|time','HYROX Full Race|bw,time',
+    'Sled Pull','Burpee Broad Jump|bw','Sandbag Walking Lunge'],
 };
+const TRAINING_STYLES = ['Full body', 'CrossFit', 'HYROX'];   // groups that are not a single muscle group
 // [name, MET] — values from the Compendium of Physical Activities (approximate)
 const C_GROUPS = {
   Treadmill: [['Treadmill – walk (5 km/h)',3.5],['Treadmill – brisk walk (6.4 km/h)',5.0],['Treadmill – incline walk (1–5%)',5.3],['Treadmill – steep incline walk (6–15%)',8.0],['Treadmill – jog (8 km/h)',8.3],['Treadmill – run (10 km/h)',9.8],['Treadmill – run (12 km/h)',11.8]],
@@ -54,14 +70,22 @@ const C_GROUPS = {
   'Gym machines': [['Stationary bike – light',3.5],['Stationary bike – moderate',6.8],['Stationary bike – vigorous',8.8],['Spinning class',8.5],['Rowing machine – moderate',7.0],['Rowing machine – vigorous',8.5],['Stair climber',9.0]],
   Dance: [['Latin salsa dancing – social',4.5],['Latin salsa dancing – fast / class',6.5],['Bachata / merengue dancing',4.5],['Zumba',6.5],['Ballroom dancing – slow',3.0]],
   Outdoor: [['Walking',3.5],['Hiking',6.0],['Running (10 km/h)',9.8],['Cycling – moderate',8.0],['Swimming – moderate',5.8],['Swimming – vigorous',9.8]],
-  'Classes & sports': [['HIIT / circuit training',8.0],['Aerobics class',7.3],['Jump rope',11.8],['Boxing – heavy bag',5.5],['Yoga',2.5],['Pilates',3.0],['Tennis',7.3],['Padel',6.0],['Soccer',7.0],['Basketball',6.5]],
+  // Padel and squash have no Compendium entry of their own; values follow racquetball/paddleball and measured studies
+  'Racket sports': [['Padel (paddle tennis)',6.0],['Padel (paddle tennis) – competitive',8.0],['Squash – casual',7.3],['Squash – competitive',12.0],
+    ['Tennis',7.3],['Tennis – doubles',6.0]],
+  'CrossFit & HYROX': [['CrossFit WOD / metcon',8.0],['CrossFit – skill / strength session',5.0],['HYROX race',9.0],['HYROX training session',8.0],
+    ['SkiErg – moderate',6.8],['SkiErg – hard',9.0],['Air bike (Assault / Echo) – hard',10.0]],
+  'Classes & sports': [['HIIT / circuit training',8.0],['Aerobics class',7.3],['Jump rope',11.8],['Boxing – heavy bag',5.5],['Yoga',2.5],['Pilates',3.0],['Soccer',7.0],['Basketball',6.5]],
 };
+// Renamed entries keep the id they were first saved under, so earlier logs still match
+const ID_ALIASES = {'Padel (paddle tennis)': 'c-padel'};
 const LIB = [];
 for (const [g, arr] of Object.entries(S_GROUPS)) for (const it of arr) {
   const [name, flags = ''] = it.split('|');
-  LIB.push({id: 's-' + slug(name), name, kind: 's', group: g, bw: flags.includes('bw'), sec: flags.includes('sec')});
+  const time = flags.includes('time');
+  LIB.push({id: 's-' + slug(name), name, kind: 's', group: g, bw: flags.includes('bw'), sec: time || flags.includes('sec'), time});
 }
-for (const [g, arr] of Object.entries(C_GROUPS)) for (const [name, met] of arr) LIB.push({id: 'c-' + slug(name), name, kind: 'c', group: g, met});
+for (const [g, arr] of Object.entries(C_GROUPS)) for (const [name, met] of arr) LIB.push({id: ID_ALIASES[name] || 'c-' + slug(name), name, kind: 'c', group: g, met});
 const LIB_MAP = Object.fromEntries(LIB.map(e => [e.id, e]));
 
 /* ---------- storage ---------- */
@@ -237,6 +261,19 @@ function cardioEstimate(act, date, min, hr) {
 const LIFT_MET = 3.5, LIFT_MIN_PER_SET = 3;
 const liftKcal = (sets, kg) => sets * kcalFor(LIFT_MET, kg, LIFT_MIN_PER_SET);
 const volumeOf = sets => sum(sets, s => s.kg * s.reps);
+// kg × seconds isn't lifting volume, so timed exercises don't count toward it
+const liftVolume = l => exById(l.ex).sec ? 0 : volumeOf(l.sets);
+const repsLabel = ex => ex.time ? 'Time (sec)' : ex.sec ? 'Seconds' : 'Reps';
+// best earlier result of a timed exercise (lowest time), ignoring the given entry's sets from upToIdx on
+function bestTimeBefore(exId, entryId, upToIdx) {
+  let m = Infinity;
+  for (const l of db.lifts) if (l.ex === exId) l.sets.forEach((s, i) => {
+    if (l.id === entryId && i >= upToIdx) return;
+    if (l.id !== entryId && l.date > S.date) return;
+    if (s.reps > 0) m = Math.min(m, s.reps);
+  });
+  return m;
+}
 function lastSession(exId, before) {
   let best = null;
   for (const l of db.lifts) if (l.ex === exId && l.date < before && l.sets.length && (!best || l.date > best.date)) best = l;
@@ -248,7 +285,7 @@ function recentIds(list, kind, n = 8) {
   return [...seen.entries()].sort((a, b) => b[1] < a[1] ? -1 : 1).map(e => e[0]).filter(id => !exById(id).hidden).slice(0, n);
 }
 function setLabel(ex, s) {
-  const reps = ex.sec ? `${fmt(s.reps)} s` : `${fmt(s.reps)}`;
+  const reps = ex.sec ? fmtDur(s.reps) : `${fmt(s.reps)}`;
   if (ex.bw && !s.kg) return ex.sec ? reps : `BW × ${reps}`;
   return ex.sec ? `${fmt(s.kg, 2)} kg · ${reps}` : `${fmt(s.kg, 2)} kg × ${reps}`;
 }
@@ -296,7 +333,7 @@ function goalsHtml(date, detail) {
     h += goalRow(`Cardio ${wk}`, `<b>${fmt(v)}</b> / ${fmt(g.cardio)} ${kc ? 'kcal' : 'min'}`, v / g.cardio, 'var(--cardio)');
   }
   if (g.volume > 0) {
-    const v = sum(db.lifts.filter(l => inW(l.date)), l => volumeOf(l.sets));
+    const v = sum(db.lifts.filter(l => inW(l.date)), liftVolume);
     h += goalRow(`Lifting volume ${wk}`, `<b>${fmtKg(v)}</b> / ${fmtKg(g.volume)}`, v / g.volume, 'var(--lift)');
   }
   if (g.sleep > 0) {
@@ -405,7 +442,7 @@ function viewLog() {
   const d = S.date;
   const cardio = db.cardio.filter(c => c.date === d);
   const lifts = db.lifts.filter(l => l.date === d);
-  const nSets = sum(lifts, l => l.sets.length), vol = sum(lifts, l => volumeOf(l.sets));
+  const nSets = sum(lifts, l => l.sets.length), vol = sum(lifts, liftVolume);
   const exK = sum(cardio, c => c.kcal) + liftKcal(nSets, bodyKgOn(d));
   const eaten = valOf('eat', d);
 
@@ -469,7 +506,8 @@ function exCard(l) {
   const sub = last ? `Last ${fmtD(last.date)}: ${last.sets.map(s => setLabel(ex, s).replace(' kg', '')).join(', ')}` : ex.group;
   const ref = l.sets[l.sets.length - 1] || (last && last.sets[0]) || {kg: ex.bw ? 0 : '', reps: ''};
   const chips = l.sets.map((s, i) => {
-    const pr = s.kg > 0 && s.kg > maxKgBefore(l.ex, l.id, i) && (last || i > 0) ? ' pr' : '';
+    const pr = (ex.time ? s.reps < bestTimeBefore(l.ex, l.id, i) && bestTimeBefore(l.ex, l.id, i) < Infinity
+      : s.kg > 0 && s.kg > maxKgBefore(l.ex, l.id, i) && (last || i > 0)) ? ' pr' : '';
     return `<button class="set-chip${pr}" data-act="edit-set" data-id="${esc(l.id)}" data-i="${i}"><b>${i + 1}</b>${setLabel(ex, s)}</button>`;
   }).join('');
   return `<div class="card ex-card" data-entry="${esc(l.id)}">
@@ -478,7 +516,7 @@ function exCard(l) {
     ${chips ? `<div class="sets">${chips}</div>` : '<div style="height:10px"></div>'}
     <div class="set-input">
       ${stepper('kg-' + l.id, ref.kg, 2.5, ex.bw ? 'Added kg' : 'Weight (kg)')}
-      ${stepper('reps-' + l.id, ref.reps, ex.sec ? 5 : 1, ex.sec ? 'Seconds' : 'Reps')}
+      ${stepper('reps-' + l.id, ref.reps, ex.sec ? 5 : 1, repsLabel(ex))}
       <button class="btn primary" data-act="add-set" data-id="${esc(l.id)}">Add set</button>
     </div></div>`;
 }
@@ -498,7 +536,7 @@ function pickerSheet(kind, title, onPick) {
     else if (group === 'Custom') items = items.filter(e => e.custom);
     else if (group !== 'All') items = items.filter(e => e.group === group);
     if (!items.length) return `<div class="empty">No matches. You can add your own in the Exercises tab.</div>`;
-    return items.map(e => `<button class="list-row" data-pick="${esc(e.id)}"><div class="grow"><div class="t">${esc(e.name)}${e.custom ? '<span class="badge">custom</span>' : ''}</div><div class="s">${esc(e.group)}${kind === 'c' ? ` · MET ${fmt(e.met, 1)}` : e.bw ? ' · bodyweight' : ''}</div></div></button>`).join('');
+    return items.map(e => `<button class="list-row" data-pick="${esc(e.id)}"><div class="grow"><div class="t">${esc(e.name)}${e.custom ? '<span class="badge">custom</span>' : ''}</div><div class="s">${esc(e.group)}${kind === 'c' ? ` · MET ${fmt(e.met, 1)}` : e.time ? ' · timed' : e.bw ? ' · bodyweight' : ''}</div></div></button>`).join('');
   };
   sheet(title, `<input id="pq" type="search" placeholder="Search…" autocomplete="off" style="margin-bottom:8px"><div class="chips" id="pchips">${chipsHtml()}</div><div id="plist">${listHtml()}</div>`, '', p => {
     p.classList.add('tall');
@@ -615,7 +653,7 @@ function libList() {
   for (const e of items) (by[e.group] = by[e.group] || []).push(e);
   const kg = bodyKgOn(today());
   return Object.entries(by).map(([g, arr]) => `<div class="sec-title"><h2>${esc(g)}</h2><span class="tiny muted">${arr.length}</span></div><div class="card" style="padding:2px 14px">` +
-    arr.map(e => `<button class="list-row" data-act="ex-info" data-id="${esc(e.id)}"><div class="grow"><div class="t">${esc(e.name)}${e.custom ? '<span class="badge">custom</span>' : ''}</div><div class="s">${kind === 'c' ? `MET ${fmt(e.met, 1)} · ≈ ${fmt(kcalFor(e.met, kg, 30))} kcal / 30 min` : e.bw ? 'Bodyweight' : ''}</div></div></button>`).join('') + `</div>`).join('');
+    arr.map(e => `<button class="list-row" data-act="ex-info" data-id="${esc(e.id)}"><div class="grow"><div class="t">${esc(e.name)}${e.custom ? '<span class="badge">custom</span>' : ''}</div><div class="s">${kind === 'c' ? `MET ${fmt(e.met, 1)} · ≈ ${fmt(kcalFor(e.met, kg, 30))} kcal / 30 min` : e.time ? 'Timed (best time)' : e.bw ? 'Bodyweight' : ''}</div></div></button>`).join('') + `</div>`).join('');
 }
 function bindLibSearch() {
   const i = $('#libq'); if (!i) return;
@@ -908,21 +946,22 @@ function statsCardio({cardio, B, per, inR}) {
 
 function statsLifting({lifts, B, per, start, end}) {
   const vb = Object.fromEntries(B.keys.map(k => [k, 0]));
-  for (const l of lifts) { const k = B.keyOf(l.date); if (k in vb) vb[k] += volumeOf(l.sets); }
-  const vol = sum(lifts, l => volumeOf(l.sets));
+  for (const l of lifts) { const k = B.keyOf(l.date); if (k in vb) vb[k] += liftVolume(l); }
+  const vol = sum(lifts, liftVolume);
   let h = secTitle(`Lifting volume per ${per}`, 'var(--lift)', `<span class="tiny muted">${fmtKg(vol)} total</span>`)
     + `<div class="card">${barChart(B.keys.map(k => ({label: B.label(k), y: vb[k]})), 'var(--lift)', 0, null, db.goals.volume > 0 && !B.monthly ? db.goals.volume : null)}<div class="tiny muted" style="margin-top:6px">Volume = weight × reps, summed over all sets.</div></div>`;
 
   // muscle group balance
   const order = Object.keys(S_GROUPS), sets = {};
   for (const l of lifts) { const g = exById(l.ex).group; sets[g] = (sets[g] || 0) + l.sets.length; }
-  const groups = [...order, ...Object.keys(sets).filter(g => !order.includes(g))];
+  // muscle groups always show; training-style groups (CrossFit, HYROX, ...) only when used
+  const groups = [...order.filter(g => !TRAINING_STYLES.includes(g) || sets[g]), ...Object.keys(sets).filter(g => !order.includes(g))];
   const weeks = Math.max(1, (diffDays(start, end) + 1) / 7), mx = Math.max(1, ...Object.values(sets).map(v => v / weeks));
   h += secTitle('Muscle group balance', 'var(--lift)', '<span class="tiny muted">sets per week</span>') + `<div class="card">`;
   if (!lifts.length) return h + `<div class="empty">No lifting in this period.</div></div>`;
   h += groups.map(g => { const v = (sets[g] || 0) / weeks;
     return `<div style="padding:6px 0"><div class="row"><span class="grow small" style="font-weight:600">${esc(g)}</span><span class="small num">${fmt(v, 1)} <span class="muted">(${sets[g] || 0} total)</span></span></div><div class="hbar"><i style="width:${v / mx * 100}%;background:${v ? 'var(--lift)' : 'transparent'}"></i></div></div>`; }).join('');
-  const missing = order.filter(g => !sets[g] && g !== 'Full body');
+  const missing = order.filter(g => !sets[g] && !TRAINING_STYLES.includes(g));
   h += `<div class="tiny muted" style="margin-top:8px">${missing.length ? `Not trained in this period: ${missing.join(', ')}. ` : ''}A common guideline is about 10–20 sets per muscle group per week.</div>`;
   return h + `</div>`;
 }
@@ -938,10 +977,12 @@ function exerciseProgress(inR) {
   for (const l of db.lifts) if (l.ex === S.statsEx && l.sets.length) (sessions[l.date] = sessions[l.date] || []).push(...l.sets);
   const dates = Object.keys(sessions).sort();
   const noWeight = dates.every(d => sessions[d].every(s => !s.kg));
-  const metrics = noWeight ? [['reps', ex.sec ? 'Longest set (s)' : 'Max reps'], ['treps', ex.sec ? 'Total seconds' : 'Total reps']]
+  const metrics = ex.time ? [['best', 'Best time (s)']].concat(noWeight ? [] : [['max', 'Weight used']])
+    : noWeight ? [['reps', ex.sec ? 'Longest set (s)' : 'Max reps'], ['treps', ex.sec ? 'Total seconds' : 'Total reps']]
     : [['max', 'Heaviest set'], ['1rm', 'Est. 1-rep max'], ['volume', 'Volume']];
   if (!metrics.some(m => m[0] === S.metric)) S.metric = metrics[0][0];
   const val = (sets, m) => m === 'max' ? Math.max(...sets.map(s => s.kg)) : m === '1rm' ? Math.max(...sets.map(s => e1rm(s.kg, s.reps)))
+    : m === 'best' ? Math.min(...sets.map(s => s.reps))
     : m === 'volume' ? volumeOf(sets) : m === 'reps' ? Math.max(...sets.map(s => s.reps)) : sum(sets, s => s.reps);
   const pts = dates.filter(inR).map(d => ({x: d, y: val(sessions[d], S.metric)}));
 
@@ -954,14 +995,17 @@ function exerciseProgress(inR) {
   let h = `<div class="card"><select id="statsEx" aria-label="Exercise" style="margin-bottom:10px">${ids.map(id => `<option value="${esc(id)}" ${id === S.statsEx ? 'selected' : ''}>${esc(exById(id).name)}</option>`).join('')}</select>
     <div class="chips" style="margin-bottom:8px">${metrics.map(([k, l]) => `<button class="chip ${S.metric === k ? 'on' : ''}" data-act="metric" data-m="${k}">${l}</button>`).join('')}</div>
     ${lineChart(pts, 'var(--lift)', 1)}</div>`;
-  h += `<div class="tiles">` + (noWeight
+  const fastest = all.reduce((a, s) => s.reps < a.reps ? s : a, all[0]);
+  h += `<div class="tiles">` + (ex.time
+    ? tile(fmtDur(fastest.reps), `Best time · ${fmtD(fastest.d)}${fastest.kg ? ` · ${fmt(fastest.kg, 2)} kg` : ''}`) + tile(dates.length, 'Sessions logged')
+    : noWeight
     ? tile(fmt(mostReps.reps), ex.sec ? 'Longest set' : 'Most reps in a set', ex.sec ? 's' : '') + tile(dates.length, 'Sessions logged')
     : tile(fmt(heavy.kg, 2), `Heaviest · ${heavy.reps} reps · ${fmtD(heavy.d)}`, 'kg') +
       tile(fmt(e1rm(best1.kg, best1.reps), 1), `Best est. 1RM · ${fmt(best1.kg, 2)}×${best1.reps}`, 'kg') +
       tile(fmt(volumeOf(sessions[bestVolD])), `Best session volume · ${fmtD(bestVolD)}`, 'kg') +
       tile(dates.length, 'Sessions logged')) + `</div>`;
   h += `<div class="card"><h3 style="margin-bottom:6px">Recent sessions</h3><table class="hist">` + dates.slice(-8).reverse().map(d =>
-    `<tr><td class="muted" style="white-space:nowrap;padding-right:10px">${fmtD(d)}</td><td>${sessions[d].map(s => setLabel(ex, s).replace(' kg', '')).join(', ')}</td><td>${noWeight ? '' : fmt(val(sessions[d], '1rm'), 1) + ' <span class="tiny muted">1RM</span>'}</td></tr>`).join('') + `</table></div>`;
+    `<tr><td class="muted" style="white-space:nowrap;padding-right:10px">${fmtD(d)}</td><td>${sessions[d].map(s => setLabel(ex, s).replace(' kg', '')).join(', ')}</td><td>${ex.time || noWeight ? '' : fmt(val(sessions[d], '1rm'), 1) + ' <span class="tiny muted">1RM</span>'}</td></tr>`).join('') + `</table></div>`;
   return h;
 }
 
@@ -1187,7 +1231,7 @@ function computeScores() {
     const inP = d => d >= p.from && d <= p.to;
     if (sh.lift) {
       const by = new Map();
-      for (const l of db.lifts) if (LIB_MAP[l.ex] && l.ex[0] === 's' && inP(l.date)) for (const s of l.sets) if (s.kg > 0 && s.reps > 0) {
+      for (const l of db.lifts) if (LIB_MAP[l.ex] && l.ex[0] === 's' && !LIB_MAP[l.ex].sec && inP(l.date)) for (const s of l.sets) if (s.kg > 0 && s.reps > 0) {
         const o = by.get(l.ex) || {rm: 0, vol: 0};
         o.rm = Math.max(o.rm, e1rm(s.kg, Math.min(s.reps, 20))); o.vol += s.kg * s.reps; by.set(l.ex, o);
       }
@@ -1452,15 +1496,17 @@ const ACT = {
   'add-set': t => {
     const id = t.dataset.id, l = db.lifts.find(x => x.id === id), ex = exById(l.ex);
     const kg = num($('#kg-' + id).value), reps = num($('#reps-' + id).value);
-    if (!(reps > 0)) return toast(ex.sec ? 'Enter seconds' : 'Enter reps');
+    if (!(reps > 0)) return toast(ex.time ? 'Enter your time in seconds' : ex.sec ? 'Enter seconds' : 'Enter reps');
     const k = kg > 0 ? Math.round(kg * 100) / 100 : 0;
     const prev = maxKgBefore(l.ex, l.id, l.sets.length), hadHistory = db.lifts.some(x => x.ex === l.ex && x.id !== l.id && x.sets.length) || l.sets.length;
+    const prevTime = bestTimeBefore(l.ex, l.id, l.sets.length);
     l.sets.push({kg: k, reps: Math.round(reps)}); save(); render();
+    if (ex.time) return toast(Math.round(reps) < prevTime && prevTime < Infinity ? `New best time: ${fmtDur(reps)}!` : `${fmtDur(reps)} logged`, Math.round(reps) < prevTime && prevTime < Infinity);
     if (k > 0 && k > prev && hadHistory) toast(`New personal record: ${fmt(k, 2)} kg!`, true); else toast(`Set ${l.sets.length} added`);
   },
   'edit-set': t => {
     const l = db.lifts.find(x => x.id === t.dataset.id), i = +t.dataset.i, s = l.sets[i], ex = exById(l.ex);
-    sheet(`${ex.name} · set ${i + 1}`, `<div class="stack">${stepper('ekg', s.kg, 2.5, ex.bw ? 'Added kg' : 'Weight (kg)')}${stepper('ereps', s.reps, ex.sec ? 5 : 1, ex.sec ? 'Seconds' : 'Reps')}</div>`,
+    sheet(`${ex.name} · set ${i + 1}`, `<div class="stack">${stepper('ekg', s.kg, 2.5, ex.bw ? 'Added kg' : 'Weight (kg)')}${stepper('ereps', s.reps, ex.sec ? 5 : 1, repsLabel(ex))}</div>`,
       `<button class="btn danger" id="sdel">Delete set</button><button class="btn primary" id="ssave">Save</button>`, p => {
       $('#ssave', p).onclick = () => {
         const kg = num($('#ekg', p).value), reps = num($('#ereps', p).value);
